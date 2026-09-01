@@ -16,22 +16,19 @@ export default function PwaInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstallable, setIsInstallable] = useState(false);
   const [installedSuccessfully, setInstalledSuccessfully] = useState(false);
-
-  const [isStandalone] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return (
-      window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true
-    );
-  });
-
-  const [dismissed, setDismissed] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return Boolean(sessionStorage.getItem('smartskoolz_pwa_prompt_dismissed'));
-  });
+  const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
-    if (isStandalone) return;
+    const standaloneMode = 
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true;
+    
+    if (standaloneMode) return;
+
+    const hasDismissed = Boolean(sessionStorage.getItem('smartskoolz_pwa_prompt_dismissed'));
+    if (hasDismissed) {
+      return;
+    }
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -54,7 +51,7 @@ export default function PwaInstallPrompt() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
-  }, [isStandalone]);
+  }, []);
 
   const handleInstallClick = async () => {
     if (!deferredPrompt) return;
@@ -74,7 +71,7 @@ export default function PwaInstallPrompt() {
     sessionStorage.setItem('smartskoolz_pwa_prompt_dismissed', 'true');
   };
 
-  if (isStandalone || dismissed) return null;
+  if (dismissed || !isInstallable) return null;
 
   return (
     <>

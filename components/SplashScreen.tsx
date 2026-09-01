@@ -6,16 +6,13 @@ import Image from 'next/image';
 
 export default function SplashScreen() {
   const [isVisible, setIsVisible] = useState(() => {
-    if (typeof window === 'undefined') return true;
+    if (typeof window === 'undefined') return false;
     const hasSeenSplashInSession = sessionStorage.getItem('smartskoolz_splash_shown');
     const isStandalone = 
       window.matchMedia('(display-mode: standalone)').matches || 
-      (window.navigator as any).standalone;
+      (window.navigator as any).standalone === true;
     
-    if (hasSeenSplashInSession && !isStandalone) {
-      return false;
-    }
-    return true;
+    return !hasSeenSplashInSession || isStandalone;
   });
 
   const [statusText, setStatusText] = useState('Initializing Terminal...');
@@ -27,22 +24,22 @@ export default function SplashScreen() {
     const t1 = setTimeout(() => {
       setStatusText('Syncing Biometrics & Terminal Cache...');
       setProgress(55);
-    }, 400);
+    }, 350);
 
     const t2 = setTimeout(() => {
       setStatusText('Connecting Secure Gateway...');
       setProgress(90);
-    }, 850);
+    }, 750);
 
     const t3 = setTimeout(() => {
       setStatusText('System Ready');
       setProgress(100);
-    }, 1200);
+    }, 1100);
 
     const t4 = setTimeout(() => {
       setIsVisible(false);
       sessionStorage.setItem('smartskoolz_splash_shown', 'true');
-    }, 1550);
+    }, 1450);
 
     return () => {
       clearTimeout(t1);
@@ -57,6 +54,10 @@ export default function SplashScreen() {
     sessionStorage.setItem('smartskoolz_splash_shown', 'true');
   };
 
+  if (!isVisible) {
+    return null;
+  }
+
   return (
     <AnimatePresence>
       {isVisible && (
@@ -64,7 +65,7 @@ export default function SplashScreen() {
           id="pwa-splash-screen"
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, scale: 1.02, filter: 'blur(8px)' }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           onClick={handleDismiss}
           className="fixed inset-0 z-9999 flex flex-col items-center justify-between bg-[#080a0f] text-white p-8 select-none cursor-pointer overflow-hidden"
         >
@@ -85,7 +86,7 @@ export default function SplashScreen() {
             <motion.div
               initial={{ scale: 0.85, opacity: 0, y: 15 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
               className="relative mb-6"
             >
               {/* Pulsing Ripple Rings */}
@@ -110,7 +111,7 @@ export default function SplashScreen() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2, duration: 0.5 }}
+              transition={{ delay: 0.15, duration: 0.45 }}
             >
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white flex items-center justify-center gap-1.5">
                 <span>SmartSkoolz</span>
@@ -129,7 +130,7 @@ export default function SplashScreen() {
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35, duration: 0.5 }}
+            transition={{ delay: 0.25, duration: 0.45 }}
             className="w-full max-w-xs flex flex-col items-center gap-3 pb-6"
           >
             {/* Progress Track */}
@@ -138,7 +139,7 @@ export default function SplashScreen() {
                 className="h-full bg-gradient-to-r from-[#007aff] via-[#00c6ff] to-[#30b357] rounded-full shadow-[0_0_12px_#007aff]"
                 initial={{ width: '0%' }}
                 animate={{ width: `${progress}%` }}
-                transition={{ duration: 0.4, ease: 'easeInOut' }}
+                transition={{ duration: 0.35, ease: 'easeInOut' }}
               />
             </div>
 
@@ -149,7 +150,7 @@ export default function SplashScreen() {
             </div>
 
             <div className="text-[10px] text-slate-500/80 pt-1">
-              Tap anywhere to continue
+              Tap anywhere to skip
             </div>
           </motion.div>
         </motion.div>

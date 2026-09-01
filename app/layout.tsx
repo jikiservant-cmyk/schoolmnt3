@@ -1,7 +1,5 @@
 import './globals.css';
-import PwaRegistry from '@/components/PwaRegistry';
-import PwaInstallPrompt from '@/components/PwaInstallPrompt';
-import SplashScreen from '@/components/SplashScreen';
+import PwaClientComponents from '@/components/PwaClientComponents';
 import { Viewport, Metadata } from 'next';
 
 export const viewport: Viewport = {
@@ -47,9 +45,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="mobile-web-app-capable" content="yes" />
       </head>
       <body className="antialiased font-sans">
-        <SplashScreen />
-        <PwaRegistry />
-        <PwaInstallPrompt />
+        <PwaClientComponents />
         {children}
       </body>
     </html>
