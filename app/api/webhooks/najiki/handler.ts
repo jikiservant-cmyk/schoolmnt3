@@ -114,14 +114,32 @@ export async function handleNajikiWebhook(req: NextRequest) {
         `tx_${Date.now()}`;
       
       if (schoolId && amount > 0) {
-        console.log(`[NaJiki Webhook] Processing wallet credit for school ${schoolId} with amount ${amount} UGX, ref: ${txRef}`);
+        let targetSchoolId = schoolId;
+        // If schoolId was passed as a tenant code, resolve to school_id or user id from public.profiles
+        try {
+          const { data: prof } = await publicAdmin
+            .from('profiles')
+            .select('id, user_id, school_id, code')
+            .eq('code', schoolId)
+            .maybeSingle();
+
+          if (prof?.school_id) {
+            targetSchoolId = prof.school_id;
+          } else if (prof?.id) {
+            targetSchoolId = prof.id;
+          }
+        } catch {
+          // ignore
+        }
+
+        console.log(`[NaJiki Webhook] Processing wallet credit for school ${targetSchoolId} (raw identifier: ${schoolId}) with amount ${amount} UGX, ref: ${txRef}`);
         
         let credited = false;
 
         // 1. Try RPC credit_wallet
         try {
           const { data: rpcResult, error: rpcError } = await publicAdmin.rpc("credit_wallet", {
-            p_school_id: schoolId,
+            p_school_id: targetSchoolId,
             p_amount: amount,
             p_tx_ref: txRef,
           });
@@ -142,7 +160,7 @@ export async function handleNajikiWebhook(req: NextRequest) {
           let { data: walletData } = await publicAdmin
             .from('wallets')
             .select('id, balance')
-            .or(`tenant_id.eq.${schoolId},school_id.eq.${schoolId}`)
+            .or(`tenant_id.eq.${targetSchoolId},school_id.eq.${targetSchoolId}`)
             .maybeSingle();
 
           let walletId = walletData?.id;
@@ -155,8 +173,8 @@ export async function handleNajikiWebhook(req: NextRequest) {
               .from('wallets')
               .insert({ 
                 id: genId,
-                school_id: schoolId, 
-                tenant_id: schoolId,
+                school_id: targetSchoolId, 
+                tenant_id: targetSchoolId,
                 balance: amount,
                 currency: 'UGX',
                 sms_rate: 50
@@ -176,7 +194,7 @@ export async function handleNajikiWebhook(req: NextRequest) {
             const { data: schoolRecord } = await publicAdmin
               .from('schools')
               .select('id, settings')
-              .eq('id', schoolId)
+              .eq('id', targetSchoolId)
               .maybeSingle();
 
             if (schoolRecord) {
@@ -189,7 +207,7 @@ export async function handleNajikiWebhook(req: NextRequest) {
                     balance: (Number(currentSettings.balance) || 0) + amount
                   }
                 })
-                .eq('id', schoolId);
+                .eq('id', targetSchoolId);
             }
           } catch (schErr) {
             console.warn('[NaJiki Webhook] Notice updating schools.settings:', schErr);

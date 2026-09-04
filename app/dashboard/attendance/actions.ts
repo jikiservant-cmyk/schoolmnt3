@@ -288,36 +288,51 @@ export async function topUpBalance(amount: number, phoneNumber: string) {
     return { error: 'School record not found.' };
   }
 
-  // 1. Resolve or provision tenant code in public.tenants
+  // 1. Resolve tenant code strictly from the database (public.tenants or public.profiles)
   let tenantCode = "";
+  
   try {
+    // Primary: Check public.tenants table for this school
     const { data: tenantData } = await publicAdmin
       .from('tenants')
-      .select('id, code, name')
-      .or(`id.eq.${school.id},name.eq.${school.name}`)
-      .maybeSingle() as any;
+      .select('code')
+      .eq('id', school.id)
+      .maybeSingle();
 
-    if (tenantData?.code) {
+    if (tenantData?.code && tenantData.code.trim() !== '') {
       tenantCode = tenantData.code;
-    } else {
-      // Auto-provision or fallback gracefully
-      tenantCode = school.settings?.tenant_code || `SCH-${school.id.substring(0, 6).toUpperCase()}`;
-      try {
-        await publicAdmin
-          .from('tenants')
-          .upsert({
-            id: school.id,
-            code: tenantCode,
-            name: school.name || 'SmartSkoolz School'
-          });
-      } catch (upsertErr) {
-        console.warn('Note on public.tenants upsert:', upsertErr);
-      }
     }
   } catch (err) {
     console.warn('Notice querying public.tenants:', err);
-    tenantCode = school.settings?.tenant_code || school.id;
   }
+
+  if (!tenantCode) {
+    try {
+      // Secondary: Check public.profiles where user matches
+      const { data: profileByUser } = await publicAdmin
+        .from('profiles')
+        .select('code')
+        .or(`id.eq.${userData.user.id},user_id.eq.${userData.user.id}`)
+        .not('code', 'is', null)
+        .maybeSingle();
+
+      if (profileByUser?.code && profileByUser.code.trim() !== '') {
+        tenantCode = profileByUser.code;
+      }
+    } catch (err) {
+      console.warn('Notice querying public.profiles:', err);
+    }
+  }
+
+  if (!tenantCode || tenantCode.trim() === '') {
+    return { 
+      error: 'Tenant code is missing from the database. Please ensure public.tenants or public.profiles has a valid "code" for this school.' 
+    };
+  }
+
+  tenantCode = tenantCode.trim();
+
+  console.log(`[NaJiki STK Push] Resolved tenant code: "${tenantCode}" for user ${userData.user.email} / school ${school.id}`);
 
   // 2. Ensure row exists in public.wallets for this school
   try {
@@ -387,9 +402,11 @@ export async function topUpBalance(amount: number, phoneNumber: string) {
   const payload = {
     applicationCode: appCode,
     paymentTypeCode: "general",
+    tenantCode: tenantCode,
+    tenant_code: tenantCode,
+    code: tenantCode,
     externalEntityId: school.id,
     schoolId: school.id,
-    tenantCode: tenantCode,
     amount: Number(amount),
     currency: "UGX",
     phoneNumber: formattedPhoneNumeric,
@@ -408,13 +425,15 @@ export async function topUpBalance(amount: number, phoneNumber: string) {
       schoolId: school.id,
       schoolName: school.name,
       tenantCode: tenantCode,
+      tenant_code: tenantCode,
+      code: tenantCode,
       amount: Number(amount),
       idempotencyKey: idempotencyKey
     }
   };
 
   try {
-    console.log(`[NaJiki STK Push] Sending request to ${endpointUrl} for ${formattedPhoneNumeric} (${amount} UGX)`);
+    console.log(`[NaJiki STK Push] Sending request to ${endpointUrl} for ${formattedPhoneNumeric} (${amount} UGX) with tenant "${tenantCode}"`);
 
     const response = await fetch(endpointUrl, {
       method: 'POST',
@@ -424,7 +443,10 @@ export async function topUpBalance(amount: number, phoneNumber: string) {
         'Authorization': `Bearer ${apiKey}`,
         'X-API-Key': apiKey,
         'X-Tenant-Code': tenantCode,
-        'X-Tenant-Id': school.id
+        'X-Tenant-Id': school.id,
+        'tenant-code': tenantCode,
+        'tenantCode': tenantCode,
+        'code': tenantCode
       },
       body: JSON.stringify(payload)
     });
