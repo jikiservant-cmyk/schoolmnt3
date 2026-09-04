@@ -20,21 +20,14 @@ export interface StudentAttendanceStatus {
   check_out_time: string | null;
 }
 
-// Note: In a true serverless environment, in-memory rate-limiting maps are lost between instances.
-// We should ideally use a durable store (Redis or Postgres). For this patch, we will check attempts via the DB
-// or fail if the environment does not persist. However, given time constraints, we'll implement rate-limiting via
-// the staff_users table by adding a check_failures counter if we could, but since we cannot modify the DB schema,
-// we'll rely on Supabase Edge Functions / KV in the future, or simulate durable rate-limiting by querying a log.
-// For now, since modifying the schema to add locked_until/failed_attempts to staff_users isn't possible here without migrations,
-// we will just remove the easily bypassed in-memory Map and implement a robust delay-based throttle to prevent rapid brute-forcing.
+// Durable rate limiting via staff_users table
+// Requires migration: ALTER TABLE staff_users ADD COLUMN failed_attempts INT DEFAULT 0, ADD COLUMN locked_until TIMESTAMPTZ;
 
 export async function verifyTeacherPin(classId: string, pin: string) {
-  // Artificial delay to prevent rapid brute-forcing (Throttling)
-  // This mitigates the worst of the brute-force attacks by slowing down every request.
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  // Retain a short delay to mitigate pure brute-force velocity
+  await new Promise(resolve => setTimeout(resolve, 500));
 
   const adminClient = createAdminClient();
-
   const cleanPin = pin.trim().toUpperCase();
 
   // 1. Fetch class to get school_id
@@ -61,21 +54,37 @@ export async function verifyTeacherPin(classId: string, pin: string) {
     return { success: false, error: 'No active teachers found for this school.' };
   }
 
-  // 3. Fetch staff_users pin_hash records for these teachers
+  // 3. Fetch staff_users records for these teachers (now including lockout fields)
   const teacherIds = teachers.map(t => t.id);
   const { data: staffUsers } = await adminClient
     .from('staff_users')
-    .select('id, person_id, pin_hash')
+    .select('id, person_id, pin_hash, failed_attempts, locked_until')
     .in('person_id', teacherIds);
 
   let matchedTeacher = null;
+  let matchedStaffUser = null;
 
   if (staffUsers && staffUsers.length > 0) {
     for (const su of staffUsers) {
       if (su.pin_hash) {
+        // Check if this specific teacher's PIN is locked
+        if (su.locked_until && new Date(su.locked_until).getTime() > Date.now()) {
+          // If we matched the pin while locked, we still reject (preventing discovery of locked accounts)
+          const isMatch = bcrypt.compareSync(cleanPin, su.pin_hash) || bcrypt.compareSync(pin.trim(), su.pin_hash);
+          if (isMatch) {
+            const remainingMins = Math.ceil((new Date(su.locked_until).getTime() - Date.now()) / 60000);
+            return {
+              success: false,
+              error: `Too many incorrect attempts. Verification locked for ${remainingMins} minute(s).`
+            };
+          }
+          continue; // Skip verification for locked users if PIN doesn't match
+        }
+
         const isMatch = bcrypt.compareSync(cleanPin, su.pin_hash) || bcrypt.compareSync(pin.trim(), su.pin_hash);
         if (isMatch) {
           matchedTeacher = teachers.find(t => t.id === su.person_id);
+          matchedStaffUser = su;
           break;
         }
       }
@@ -83,10 +92,39 @@ export async function verifyTeacherPin(classId: string, pin: string) {
   }
 
   if (!matchedTeacher) {
+    // We don't know *which* teacher they were trying to guess, so we apply the failed attempt
+    // to ALL unlocked teachers in this class as a defensive measure.
+    // In a real system, the user should provide a Teacher ID + PIN to avoid penalizing everyone.
+    // For this design (PIN only), we increment failures globally for the school's teachers.
+    if (staffUsers && staffUsers.length > 0) {
+      const now = new Date();
+      for (const su of staffUsers) {
+        if (!su.locked_until || new Date(su.locked_until).getTime() <= now.getTime()) {
+          const newFailures = (su.failed_attempts || 0) + 1;
+          const updateData: any = { failed_attempts: newFailures };
+          
+          if (newFailures >= 5) {
+            updateData.locked_until = new Date(now.getTime() + 10 * 60 * 1000).toISOString(); // 10 min
+          }
+
+          // Fire and forget update
+          adminClient.from('staff_users').update(updateData).eq('id', su.id).then();
+        }
+      }
+    }
+
     return {
       success: false,
       error: 'Invalid Teacher Attendance PIN. Please try again.'
     };
+  }
+
+  // Clear failed attempts on success for the matched teacher
+  if (matchedStaffUser && ((matchedStaffUser.failed_attempts || 0) > 0 || matchedStaffUser.locked_until)) {
+    await adminClient
+      .from('staff_users')
+      .update({ failed_attempts: 0, locked_until: null })
+      .eq('id', matchedStaffUser.id);
   }
 
   return { success: true, teacher: matchedTeacher };
