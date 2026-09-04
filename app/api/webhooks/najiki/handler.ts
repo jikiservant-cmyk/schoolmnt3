@@ -11,22 +11,27 @@ export async function handleNajikiWebhook(req: NextRequest) {
     const expectedSecret = 
       process.env.NAJIKI_API_KEY || 
       process.env.SCHOOL_SECRET_KEY || 
-      process.env.NAJIKI_SECRET_KEY || 
-      'school_secret_key_123';
+      process.env.NAJIKI_SECRET_KEY;
+
+    if (!expectedSecret) {
+      console.error('[NaJiki Webhook] Missing webhook secret configuration in environment variables.');
+      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+    }
 
     const authHeader = headersList.get('authorization');
     const signatureHeader = headersList.get('x-najiki-signature') || headersList.get('x-signature') || headersList.get('x-webhook-signature');
+
+    if (!authHeader && !signatureHeader) {
+      console.warn('[NaJiki Webhook] Missing authentication headers.');
+      return NextResponse.json({ error: 'Unauthorized: Missing authentication headers' }, { status: 401 });
+    }
 
     let isAuthorized = false;
 
     // 1. Verify Authorization Bearer token
     if (authHeader) {
       const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      if (
-        token === expectedSecret ||
-        token === 'school_secret_key_123' ||
-        token === (process.env.NAJIKI_API_KEY || 'test_key')
-      ) {
+      if (token === expectedSecret) {
         isAuthorized = true;
       }
     }
@@ -44,12 +49,9 @@ export async function handleNajikiWebhook(req: NextRequest) {
       }
     }
 
-    // Default to true if no headers provided during development / testing, otherwise fail if invalid header sent
-    if (authHeader || signatureHeader) {
-      if (!isAuthorized) {
-        console.warn('[NaJiki Webhook] Unauthorized NaJiki webhook attempt.');
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-      }
+    if (!isAuthorized) {
+      console.warn('[NaJiki Webhook] Unauthorized NaJiki webhook attempt.');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     let payload: any;
